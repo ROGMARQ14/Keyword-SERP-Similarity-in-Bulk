@@ -48,7 +48,13 @@ def serp(api_key, query, location="United States", num_results="9"):
             st.error(f"Error parsing API response: {str(e)}")
             return {"error": "Failed to parse response"}
     else:
-        st.error(f"API request failed with status code: {api_result.status_code}")
+        if api_result.status_code == 402:
+            st.error("Payment Required: Your ValueSERP API key may be invalid, out of credits, or requires a subscription. Please check your account at ValueSERP.")
+            st.info("If you're using a trial key, you may need to upgrade to a paid plan to continue using the API.")
+            return {"error": "Payment required for API access"}
+        else:
+            st.error(f"API request failed with status code: {api_result.status_code}")
+        
         try:
             error_json = api_result.json()
             return {"error": error_json.get("error", f"Status code: {api_result.status_code}")}
@@ -249,50 +255,26 @@ if process_button:
                     # Full URL comparison
                     serp_comp = []
                     try:
-                        # ValueSERP might use different key structures
-                        potential_keys = [
-                            "organic_results",  # Standard 
-                            "search_results",   # Alternative 
-                            "results",          # Alternative
-                            "organic"           # Alternative
-                        ]
-                        
-                        # Find the correct key for organic results
-                        organic_key = None
-                        for key in potential_keys:
-                            if key in results and isinstance(results[key], list):
-                                organic_key = key
-                                break
-                        
-                        # If no standard key is found, examine the response structure
-                        if organic_key is None:
-                            st.warning(f"Could not find organic results for '{keyword}' using standard keys")
+                        # Navigate through Data for SEO response structure to find organic results
+                        if "tasks" in results and len(results["tasks"]) > 0:
+                            task = results["tasks"][0]
                             
-                            # Look for any list in the response that might contain URLs
-                            for key, value in results.items():
-                                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-                                    if "link" in value[0] or "url" in value[0]:
-                                        organic_key = key
-                                        st.success(f"Found alternative key: {organic_key}")
-                                        break
-                            
-                            if organic_key is None:
-                                st.error(f"Could not find any suitable organic results for '{keyword}'")
-                                continue
-                        
-                        # Extract URLs
-                        for item in results[organic_key]:
-                            # Find the URL field (might be 'link' or 'url')
-                            url = None
-                            if "link" in item:
-                                url = item["link"]
-                            elif "url" in item:
-                                url = item["url"]
-                            elif "displayed_link" in item:
-                                url = item["displayed_link"]
+                            if "result" in task and len(task["result"]) > 0:
+                                result_data = task["result"][0]
                                 
-                            if url:
-                                serp_comp.append(url)
+                                if "items" in result_data:
+                                    # Filter out only organic results (not paid, featured snippets, etc)
+                                    organic_items = [item for item in result_data["items"] 
+                                                     if item.get("type") == "organic"]
+                                    
+                                    # Extract URLs from organic results
+                                    for item in organic_items[:10]:  # Limit to top 10 results
+                                        if "url" in item:
+                                            serp_comp.append(item["url"])
+                        
+                        # If no results were found
+                        if not serp_comp:
+                            st.warning(f"No organic results found for '{keyword}'")
                     
                     except Exception as e:
                         st.error(f"Error processing results for '{keyword}': {str(e)}")
