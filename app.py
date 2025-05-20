@@ -33,25 +33,93 @@ def serp(api_key, query, location="United States", num_results="9"):
         "google_domain": "google.com",
         "device": "desktop",
         "num": num_results,
+        "output": "json",  # Ensure JSON output format
+        "flatten_results": "true"  # Get flattened results structure
     }
     
     # Make the HTTP GET request to ValueSERP
     api_result = requests.get('https://api.valueserp.com/search', params)
     
-    # Return JSON response from ValueSERP
-    return api_result.json()
+    # Check if the request was successful
+    if api_result.status_code == 200:
+        try:
+            return api_result.json()
+        except Exception as e:
+            st.error(f"Error parsing API response: {str(e)}")
+            return {"error": "Failed to parse response"}
+    else:
+        st.error(f"API request failed with status code: {api_result.status_code}")
+        try:
+            error_json = api_result.json()
+            return {"error": error_json.get("error", f"Status code: {api_result.status_code}")}
+        except:
+            return {"error": f"Status code: {api_result.status_code}"}
 
 # Function to extract domains from SERP
 def get_serp_comp(results):
     serp_comp = []
+    
     try:
-        for x in results["organic_results"]:
-            ext = tldextract.extract(x["link"])
-            domain = ext.domain + '.' + ext.suffix
-            serp_comp.append(domain)
-    except KeyError:
-        st.error(f"Error extracting organic results. Check the API response.")
+        # Add debug information
+        if "error" in results:
+            st.error(f"API Error: {results['error']}")
+            return []
+        
+        # ValueSERP might use different key structures
+        potential_keys = [
+            "organic_results",  # Standard 
+            "search_results",   # Alternative 
+            "results",          # Alternative
+            "organic"           # Alternative
+        ]
+        
+        # Find the correct key for organic results
+        organic_key = None
+        for key in potential_keys:
+            if key in results and isinstance(results[key], list):
+                organic_key = key
+                break
+        
+        # If no standard key is found, examine the response structure
+        if organic_key is None:
+            st.warning("Could not find organic results using standard keys")
+            st.json(results)
+            
+            # Look for any list in the response that might contain URLs
+            for key, value in results.items():
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    if "link" in value[0] or "url" in value[0]:
+                        organic_key = key
+                        st.success(f"Found alternative key: {organic_key}")
+                        break
+            
+            if organic_key is None:
+                st.error("Could not find any suitable organic results in the response")
+                return []
+                
+        # Extract domains
+        for item in results[organic_key]:
+            # Find the URL field (might be 'link' or 'url')
+            url = None
+            if "link" in item:
+                url = item["link"]
+            elif "url" in item:
+                url = item["url"]
+            elif "displayed_link" in item:
+                url = item["displayed_link"]
+                
+            if url:
+                ext = tldextract.extract(url)
+                domain = ext.domain + '.' + ext.suffix
+                serp_comp.append(domain)
+            
+    except Exception as e:
+        st.error(f"Error processing results: {str(e)}")
+        st.info("API Response preview:")
+        # Show a portion of the response for debugging
+        st.json({k: str(results[k])[:100] + "..." for k in list(results.keys())[:5]} if results and isinstance(results, dict) else {})
         return []
+        
     return serp_comp
 
 # Function to calculate SERP difference percentages
@@ -181,10 +249,53 @@ if process_button:
                     # Full URL comparison
                     serp_comp = []
                     try:
-                        for x in results["organic_results"]:
-                            serp_comp.append(x["link"])
-                    except KeyError:
-                        st.error(f"Error extracting organic results for '{keyword}'. Check the API response.")
+                        # ValueSERP might use different key structures
+                        potential_keys = [
+                            "organic_results",  # Standard 
+                            "search_results",   # Alternative 
+                            "results",          # Alternative
+                            "organic"           # Alternative
+                        ]
+                        
+                        # Find the correct key for organic results
+                        organic_key = None
+                        for key in potential_keys:
+                            if key in results and isinstance(results[key], list):
+                                organic_key = key
+                                break
+                        
+                        # If no standard key is found, examine the response structure
+                        if organic_key is None:
+                            st.warning(f"Could not find organic results for '{keyword}' using standard keys")
+                            
+                            # Look for any list in the response that might contain URLs
+                            for key, value in results.items():
+                                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                                    if "link" in value[0] or "url" in value[0]:
+                                        organic_key = key
+                                        st.success(f"Found alternative key: {organic_key}")
+                                        break
+                            
+                            if organic_key is None:
+                                st.error(f"Could not find any suitable organic results for '{keyword}'")
+                                continue
+                        
+                        # Extract URLs
+                        for item in results[organic_key]:
+                            # Find the URL field (might be 'link' or 'url')
+                            url = None
+                            if "link" in item:
+                                url = item["link"]
+                            elif "url" in item:
+                                url = item["url"]
+                            elif "displayed_link" in item:
+                                url = item["displayed_link"]
+                                
+                            if url:
+                                serp_comp.append(url)
+                    
+                    except Exception as e:
+                        st.error(f"Error processing results for '{keyword}': {str(e)}")
                         continue
                 
                 serp_comp_list.append(serp_comp)
