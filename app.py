@@ -3,7 +3,8 @@ import pandas as pd
 import difflib
 import tldextract
 import seaborn as sns
-from serpapi import GoogleSearch
+import requests
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -21,9 +22,10 @@ This tool allows you to compare the similarity between search engine results pag
 It helps identify keyword cannibalization issues and improve your SEO strategy.
 """)
 
-# Function to call SERP API
+# Function to call ValueSERP API
 def serp(api_key, query, location="United States", num_results="9"):
     params = {
+        "api_key": api_key,
         "q": query,
         "location": location,
         "hl": "en",
@@ -31,13 +33,13 @@ def serp(api_key, query, location="United States", num_results="9"):
         "google_domain": "google.com",
         "device": "desktop",
         "num": num_results,
-        "api_key": api_key
     }
     
-    search = GoogleSearch(params)
-    results = search.get_dict()
+    # Make the HTTP GET request to ValueSERP
+    api_result = requests.get('https://api.valueserp.com/search', params)
     
-    return results
+    # Return JSON response from ValueSERP
+    return api_result.json()
 
 # Function to extract domains from SERP
 def get_serp_comp(results):
@@ -75,9 +77,9 @@ def get_keyword_serp_diffs(serp_comp):
 # Sidebar for API key input
 with st.sidebar:
     st.header("Configuration")
-    api_key = st.text_input("Enter your SerpAPI Key", type="password")
+    api_key = st.text_input("Enter your ValueSERP Key", type="password")
     st.markdown("""
-    Don't have an API key? [Sign up for SerpAPI](https://serpapi.com/)
+    Don't have an API key? [Sign up for ValueSERP](https://valueserp.com/)
     """)
     
     # Location input
@@ -102,13 +104,49 @@ col1, col2 = st.columns([3, 2])
 with col1:
     # Keywords input
     st.subheader("Enter Keywords")
-    keywords_input = st.text_area(
-        "Enter keywords (one per line)",
-        height=200,
-        placeholder="International Business Machines Corporation\nIBM\nbig blue\nInternational Business Machines\nWatson"
+    input_method = st.radio(
+        "Input Method",
+        ["Text Input", "File Upload"],
+        horizontal=True
     )
     
-    keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
+    keywords = []
+    
+    if input_method == "Text Input":
+        keywords_input = st.text_area(
+            "Enter keywords (one per line)",
+            height=200,
+            placeholder="International Business Machines Corporation\nIBM\nbig blue\nInternational Business Machines\nWatson"
+        )
+        keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
+    else:
+        uploaded_file = st.file_uploader("Upload a CSV or TXT file with keywords", type=["csv", "txt"])
+        if uploaded_file is not None:
+            try:
+                # Check file type
+                if uploaded_file.name.endswith('.csv'):
+                    # Try to read as CSV with different delimiters
+                    try:
+                        df = pd.read_csv(uploaded_file)
+                        # Use first column as keywords
+                        keywords = df.iloc[:, 0].dropna().tolist()
+                    except:
+                        # If comma delimiter fails, try tab
+                        uploaded_file.seek(0)  # Reset file pointer
+                        df = pd.read_csv(uploaded_file, sep='\t')
+                        keywords = df.iloc[:, 0].dropna().tolist()
+                else:
+                    # Read as plain text file
+                    keywords = [line.decode('utf-8').strip() for line in uploaded_file if line.decode('utf-8').strip()]
+                
+                st.success(f"Successfully loaded {len(keywords)} keywords")
+                
+                # Show preview
+                if keywords:
+                    st.write("Preview:")
+                    st.write(keywords[:5] + (["..."] if len(keywords) > 5 else []))
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
     
     # Process button
     process_button = st.button("Analyze SERP Similarity", disabled=(not api_key or not keywords))
@@ -118,7 +156,6 @@ with col2:
     st.subheader("Recommendations")
     st.markdown("""
     - Compare topically similar keywords for best results
-    - Limit to 20 or fewer keywords for meaningful analysis
     - Higher similarity percentage means the SERPs are more similar
     - Low similarity may indicate the keywords target different intents
     """)
@@ -134,7 +171,7 @@ if process_button:
             for i, keyword in enumerate(keywords):
                 st.text(f"Processing: {keyword}")
                 
-                # Call SerpAPI
+                # Call ValueSERP API
                 results = serp(api_key, keyword, location, num_results)
                 
                 # Extract domains or URLs
